@@ -1,0 +1,559 @@
+{
+  "name": "Validação de documentos fiscais",
+  "nodes": [
+    {
+      "parameters": {
+        "format": "resolved",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]",
+          "forceReconnect": 5
+        }
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        176,
+        16
+      ],
+      "id": "dc591bea-8966-48a3-8daf-9213657fe3b7",
+      "name": "Email Trigger (IMAP)",
+      "credentials": {
+        "imap": {
+          "id": "qpVssK6UxLkgMUUO",
+          "name": "IMAP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        -528
+      ],
+      "id": "04f5096b-8dae-468d-9914-5f5c2375c8b4",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "u3Nwh0HitGWVDrVk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  let texto = item.json.text || item.json.response || item.json.output || \"\";\n  \n  // Remove markdown caso a AI envolva em ```json\n  texto = texto.replace(/```json\\s*/g, \"\").replace(/```/g, \"\").trim();\n  \n  let dados;\n  try {\n    dados = JSON.parse(texto);\n  } catch (e) {\n    dados = {\n      tipo: \"PARSE_FALHA\",\n      cnpj: \"\",\n      razao_social: \"\",\n      data_emissao: \"\",\n      data_validade: \"\",\n      valor: null,\n      ignorar: true,\n      erro: \"AI não retornou JSON válido\"\n    };\n  }\n\n  results.push({ json: dados });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -320
+      ],
+      "id": "ea9789bd-7f7a-4af7-a768-6983b545167c",
+      "name": "Parsing"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b134a4a8-c019-4587-a396-9813056e597b",
+              "leftValue": "={{ Object.keys($binary || {}).length > 0? \"sim\": \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        384,
+        16
+      ],
+      "id": "b55c35c2-131e-475a-a456-b126dad5597c",
+      "name": "Se tem anexo"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  const binaryKeys = Object.keys(item.binary || {});\n  \n  for (const key of binaryKeys) {\n    results.push({\n      json: {\n        remetente: item.json.from,\n        assunto: item.json.subject,\n        dataEmail: item.json.date,\n        nomeArquivo: item.binary[key].fileName,\n        tipoArquivo: item.binary[key].mimeType\n      },\n      binary: {\n        data: item.binary[key],\n        backup: item.binary[key]\n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -176
+      ],
+      "id": "a531617d-3c77-44b7-9167-3745fd705421",
+      "name": "Separa em n items"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        -176
+      ],
+      "id": "ffb5d7ae-bd86-4e09-b0d8-cdc60984602b",
+      "name": "Extrai o texto"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "94edc99c-e962-4a33-9501-cb5eda968eee",
+              "leftValue": "={{ $json.text.trim().length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        944,
+        -176
+      ],
+      "id": "c174f657-a7f7-47f7-a0d7-034b9b098330",
+      "name": "Se existe texto"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analise o texto de um documento fiscal brasileiro.\n\nClassifique o tipo:\nCND_FEDERAL, CND_ESTADUAL DA PROCURADORIA GERAL (Débitos inscritos), CND_ESTADUAL DA SECRETARIA DA FAZENDA (Débitos não Inscritos), CND_MUNICIPAL, CND_FGTS, CND_TRABALHISTA,\nGUIA_DARF, GUIA_FGTS, GUIA_INSS, COMPROVANTE_PAGAMENTO, OUTRO\n\nExtraia os campos aplicaveis:\n- cnpj\n- razao_social\n- tipo (da lista acima)\n- data_emissao (YYYY-MM-DD)\n- data_validade (YYYY-MM-DD)\n- valor (numerico, sem R$)\n\nSe nao for documento fiscal, retorne tipo OUTRO com ignorar true.\nResponda APENAS JSON, sem explicacao, sem markdown:\n{\"tipo\":\"\",\"cnpj\":\"\",\"razao_social\":\"\",\"data_emissao\":\"\",\"data_validade\":\"\",\"valor\":null,\"ignorar\":false}\n\nTexto do documento:\n{{ $json.text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "="
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1152,
+        -320
+      ],
+      "id": "a1b980cc-dcac-4cb2-9444-2c8027da7db1",
+      "name": "Analise do documento - LLM",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "56686295-08c6-4869-beb2-26217f38ee56",
+              "leftValue": "={{ $json.ignorar }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1920,
+        -320
+      ],
+      "id": "24aa95ee-a773-4d75-831e-04813ba05ff9",
+      "name": "Se é um Doc Fiscal"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  const dados = item.json;\n  const hoje = new Date();\n  hoje.setHours(0, 0, 0, 0);\n\n  let status = \"SEM_VALIDADE\";\n  let diasRestantes = null;\n\n  if (dados.data_validade) {\n    const validade = new Date(dados.data_validade + \"T00:00:00\");\n    const diffMs = validade.getTime() - hoje.getTime();\n    diasRestantes = Math.ceil(diffMs / (1000 * 60 * 60 * 24));\n\n    if (diasRestantes < 0) {\n      status = \"VENCIDO\";\n    } else if (diasRestantes <= 30) {\n      status = \"VENCE_EM_BREVE\";\n    } else {\n      status = \"VALIDO\";\n    }\n  }\n\n  results.push({\n    json: {\n      cnpj: dados.cnpj || \"\",\n      razao_social: dados.razao_social || \"\",\n      tipo: dados.tipo || \"\",\n      data_emissao: dados.data_emissao || \"\",\n      data_validade: dados.data_validade || \"\",\n      valor: dados.valor,\n      status: status,\n      dias_restantes: diasRestantes,\n      data_verificacao: hoje.toISOString().split(\"T\")[0]\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        -432
+      ],
+      "id": "9aac5d85-e26f-4b7e-9a24-73505d318cd8",
+      "name": "Analise da validade"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "LINK_GOOGLE_SHEET",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Página1",
+          "cachedResultUrl": "LINK_GOOGLE_SHEET"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "cnpj",
+              "displayName": "cnpj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "razao_social",
+              "displayName": "razao_social",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_emissao",
+              "displayName": "data_emissao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_validade",
+              "displayName": "data_validade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "valor",
+              "displayName": "valor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dias_restantes",
+              "displayName": "dias_restantes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_verificacao",
+              "displayName": "data_verificacao",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2336,
+        -432
+      ],
+      "id": "01ef0a0a-e778-424f-80d6-1340464761df",
+      "name": "Output",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zRWDrlFQVfnMugMS",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\nconst items = $input.all();\n\nfor (let i = 0; i < items.length; i++) {\n  const buffer = await this.helpers.getBinaryDataBuffer(i, 'backup');\n  const base64 = buffer.toString('base64');\n  \n  results.push({\n    json: {\n      base64: base64,\n      mimeType: items[i].binary?.backup?.mimeType || \"application/pdf\",\n      nomeArquivo: items[i].binary?.backup?.fileName || \"documento\"\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        -16
+      ],
+      "id": "a5c3d02b-f74e-4e71-9ef8-f2b50b7dec10",
+      "name": "Transforma em binário"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  let texto = \"\";\n  \n  try {\n    texto = item.json.candidates[0].content.parts[0].text || \"\";\n  } catch (e) {\n    texto = '{\"tipo\":\"PARSE_FALHA\",\"cnpj\":\"\",\"razao_social\":\"\",\"data_emissao\":\"\",\"data_validade\":\"\",\"valor\":null,\"ignorar\":true}';\n  }\n\n  texto = texto.replace(/```json\\s*/g, \"\").replace(/```/g, \"\").trim();\n\n  results.push({ json: { text: texto } });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -16
+      ],
+      "id": "66fd255e-d7e2-464a-beac-818cbc0d325f",
+      "name": "Processa resposta da IA"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=SUA_CHAVE_API_:)",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [\n      {\n        \"inline_data\": {\n          \"mime_type\": \"{{ $json.mimeType }}\",\n          \"data\": \"{{ $json.base64 }}\"\n        }\n      },\n      {\n        \"text\": \"Analise este documento fiscal brasileiro. Classifique o tipo: CND_FEDERAL, CND_ESTADUAL DA PROCURADORIA GERAL (Débitos inscritos), CND_ESTADUAL DA SECRETARIA DA FAZENDA (Débitos não Inscritos), CND_MUNICIPAL, CND_FGTS, CND_TRABALHISTA, GUIA_DARF, GUIA_ISS, GUIA_INSS, GUIA_FGTS, COMPROVANTE_PAGAMENTO, OUTRO. Extraia os campos aplicaveis: cnpj, razao_social, tipo, data_emissao (YYYY-MM-DD), data_validade (YYYY-MM-DD), valor (numerico sem R$). Se nao for documento fiscal retorne tipo OUTRO com ignorar true. Responda APENAS JSON: {\\\"tipo\\\":\\\"\\\",\\\"cnpj\\\":\\\"\\\",\\\"razao_social\\\":\\\"\\\",\\\"data_emissao\\\":\\\"\\\",\\\"data_validade\\\":\\\"\\\",\\\"valor\\\":null,\\\"ignorar\\\":false}\"\n      }\n    ]\n  }]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1328,
+        -16
+      ],
+      "id": "4908b8fa-ab35-40c1-abea-d942d1199ea1",
+      "name": "Requisita a IA"
+    }
+  ],
+
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Se tem anexo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analise do documento - LLM",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsing": {
+      "main": [
+        [
+          {
+            "node": "Se é um Doc Fiscal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Se tem anexo": {
+      "main": [
+        [
+          {
+            "node": "Separa em n items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Separa em n items": {
+      "main": [
+        [
+          {
+            "node": "Extrai o texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai o texto": {
+      "main": [
+        [
+          {
+            "node": "Se existe texto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Se existe texto": {
+      "main": [
+        [
+          {
+            "node": "Analise do documento - LLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transforma em binário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analise do documento - LLM": {
+      "main": [
+        [
+          {
+            "node": "Parsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Se é um Doc Fiscal": {
+      "main": [
+        [
+          {
+            "node": "Analise da validade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analise da validade": {
+      "main": [
+        [
+          {
+            "node": "Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transforma em binário": {
+      "main": [
+        [
+          {
+            "node": "Requisita a IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processa resposta da IA": {
+      "main": [
+        [
+          {
+            "node": "Parsing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requisita a IA": {
+      "main": [
+        [
+          {
+            "node": "Processa resposta da IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d5af99da-a4fc-46b4-8503-0848162967b7",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "id": "S6Q4RQDErvmcaWaJ",
+  "tags": []
+}
