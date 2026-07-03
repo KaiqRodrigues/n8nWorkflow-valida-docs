@@ -31,13 +31,13 @@ O projeto é composto por dois serviços via Docker Compose:
     └───────────┘              └──────────────┘
 ```
 
-**imap-service** — serviço Python (Flask) que conecta ao servidor IMAP via imaplib, busca emails não lidos (UNSEEN), extrai anexos, converte para base64 e retorna os dados em JSON via endpoint REST (GET /buscar-emails). Cada anexo é retornado como um item individual com remetente, assunto, data, nome do arquivo, MIME type e conteúdo em base64.
+**imap-service** — serviço Python (Flask) que conecta ao servidor IMAP via imaplib, busca emails não lidos (UNSEEN), extrai anexos, converte para base64 e retorna os dados em JSON via endpoint REST (GET /buscar-emails). Cada anxo é retornado como um item individual com remetente, assunto, data, nome do arquivo, MIME type e conteúdo em base64.
 
 **n8n** — executa o workflow de classificação e validação. Consome o endpoint do imap-service via Schedule Trigger + HTTP Request.
 
 ### Separação do serivço de conexão IMAP do trigger
 
-A conexão do node IMAP Trigger do n8n por algum motivo caia mesmo com o "Force Reconnection" ativado, pesquisando descobri que possui um bug documentado onde a conexão com o servidor cai silenciosamente e o workflow não dispara, mesmo com a opção Force Reconnection ativada. O node funciona em execução manual, onde eu precisava executar o node após ou durante o envio do email de teste que eu fazia, mas essa situação não condiz com uma automação.
+A conexão do node IMAP Trigger do n8n por algum motivo caia mesmo com o "Force Reconnection" ativado, pesquisando descobri que possui um bug documentado onde a conexão com o servidor cai e o workflow não dispara, mesmo com a opção Force Reconnection ativada. O node funciona em execução manual, onde eu precisava executar o node após ou durante o envio do email de teste que eu fazia, mas essa situação não condiz com uma automação.
 
 A alternativa seria usar Schedule Trigger + um node de leitura IMAP, mas o n8n não oferece um node IMAP de leitura como ação (separado do trigger).
 
@@ -76,7 +76,7 @@ Gemini Flash (LLM Chain)                    Processa resposta da IA
 
 A extração direta de texto pega os caracteres exatos embutidos no PDF. Um CNPJ como 111.222.333/0001-22 sai exatamente assim, sem interpretação. Já o Vision AI lê a partir da imagem renderizada do documento e pode errar com caracteres (0 vs O, 1 vs l), números pequenos, ou texto parcialmente coberto por marca d'água — como a CND Estadual da PGE-SP, onde o CNPJ foi lido como 777222333 em vez de 111222333 por sobreposição do brasão do estado. O erro do OCR, não pode ser aceito nessa validação.
 
-O pipeline mantém texto puro quando disponível (maioria das guias e CNDs federais) e aciona Vision AI apenas como fallback para documentos que não possuem texto selecionável (PDFs renderizados como imagem). Ambos os caminhos convergem para o mesmo node de Parsing e seguem o fluxo idêntico dali em diante.
+O pipeline mantém texto puro quando disponível (maioria das guias e CNDs federais) e aciona Vision AI apenas como fallback para documentos que não possuem texto selecionável (PDFs renderizados como imagem). Ambos os caminhos vão para o mesmo node de Parsing e seguem o fluxo idêntico dali em diante.
 
 ### Escolha do modelo
 
@@ -92,19 +92,19 @@ O Gemini Flash foi escolhido por ser o único modelo com capacidade multimodal (
 
 Para produção com dados reais, seria recomendado migrar para um paid tier (onde os dados não são utilizados para treinamento) ou para um modelo local robusto (ex: Qwen 27B+ via Ollama), garantindo privacidade dos dados fiscais dos prestadores.
 
-### Por que HTTP Request direto na API do Gemini (caminho Vision) em vez de outro LLM Chain?
+### HTTP Request direto na API do Gemini (caminho Vision) 
 
-O Basic LLM Chain do n8n trabalha com entrada de texto. Para enviar uma imagem (documento renderizado) ao Gemini, é necessário incluir o binário em base64 no corpo da requisição como inline_data — funcionalidade que o LLM Chain não expõe. O HTTP Request permite montar o payload exato da API do Gemini com o documento em base64 e o prompt na mesma requisição.
+O Basic LLM Chain do n8n trabalha com entrada de texto. Para enviar uma imagem (documento renderizado) ao Gemini, é necessário incluir o binário em base64 no corpo da requisição como inline_data — funcionalidade que o LLM Chain não possui, ou pelo menos não encontrei. O HTTP Request permite montar o payload exato da API do Gemini com o documento em base64 e o prompt na mesma requisição.
 
 ## Descrição dos nodes
 
 **Schedule Trigger** — dispara o workflow em intervalos configuráveis (ex: a cada 30 minutos).
 
-**HTTP Request (imap-service)** — chama `http://imap-service:5000/buscar-emails` e recebe os anexos em JSON com base64. Substitui os nodes IMAP Trigger + Se tem anexo + Separa em n items da versão anterior.
+**HTTP Request (imap-service)** — chama `http://imap-service:5000/buscar-emails` e recebe os anexos em JSON com base64. Substitui os nodes IMAP Trigger + Se tem anexo + Separa em n items de uma versão anterior.
 
-**Extrai o texto** — Extract from File (operação PDF). Converte o PDF em texto plano. Consome o binário principal mas preserva o backup.
+**Extrai o texto** — Extract from File (operação PDF). Converte o PDF em texto plano. Preserva o backup.
 
-**Se existe texto** — condicional que verifica se a extração retornou conteúdo (`text.trim().length > 0`). Documentos com texto embutido seguem pelo caminho principal; documentos renderizados como imagem seguem pelo fallback de Vision AI.
+**Se existe texto** — condicional que verifica se a extração retornou conteúdo “`text.trim().length > 0`”. Documentos com texto seguem pelo caminho principal; documentos renderizados como imagem seguem pelo fallback de Vision AI.
 
 **Analise do documento - LLM** — Basic LLM Chain conectado ao Google Gemini 2.5 Flash (temperature 0). Recebe o texto extraído e retorna um JSON estruturado com tipo do documento, CNPJ, razão social, datas e valor.
 
@@ -180,7 +180,7 @@ docker compose up --build
 
 O n8n estará disponível em `http://localhost:5678` e o imap-service em `http://localhost:5000`.
 
-Para testar o imap-service isoladamente:
+Para testar o imap-service:
 
 ```bash
 curl http://localhost:5000/buscar-emails
@@ -200,7 +200,7 @@ Acesse [aistudio.google.com](https://aistudio.google.com), gere uma API key e in
 
 ### 5. Google Sheets
 
-O workflow utiliza o Google Sheets como destino dos dados extraídos. Para conectar o n8n à sua conta Google, é necessário criar credenciais OAuth2 no [Google Cloud Console](https://console.cloud.google.com):
+O workflow utiliza o Google Sheets como output dos dados extraídos. Para conectar o n8n à sua conta Google, é necessário criar credenciais OAuth2 no [Google Cloud Console](https://console.cloud.google.com):
 
 1. Crie um projeto e ative a **Google Sheets API**
 2. Configure a tela de consentimento OAuth (tipo Externo)
@@ -208,7 +208,7 @@ O workflow utiliza o Google Sheets como destino dos dados extraídos. Para conec
 4. No URI de redirecionamento, utilize o callback do seu n8n (ex: `http://localhost:5678/rest/oauth2-credential/callback`)
 5. Insira as credenciais no node do Google Sheets e autorize o acesso
 
-Crie uma planilha com os seguintes cabeçalhos na primeira linha:
+Cabeçalhos esperados:
 
 ```
 cnpj | razao_social | tipo | data_emissao | data_validade | valor | status | dias_restantes | data_verificacao
